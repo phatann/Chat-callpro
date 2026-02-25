@@ -1,0 +1,8 @@
+{
+  "name": "Chat & Call Pro",
+  "description": "A professional real-time messaging and calling application featuring secure login, instant messaging, and video/voice calls.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
