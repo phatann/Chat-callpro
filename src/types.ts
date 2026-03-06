@@ -4,6 +4,8 @@ export interface User {
   email: string | null;
   phone: string | null;
   avatar_url: string;
+  role?: string;
+  status?: string;
 }
 
 export interface Message {

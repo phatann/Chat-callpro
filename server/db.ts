@@ -34,14 +34,37 @@ db.exec(`
     FOREIGN KEY(sender_id) REFERENCES users(id),
     FOREIGN KEY(receiver_id) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS blocked_users (
+    user_id TEXT NOT NULL,
+    blocked_user_id TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, blocked_user_id),
+    FOREIGN KEY(user_id) REFERENCES users(id),
+    FOREIGN KEY(blocked_user_id) REFERENCES users(id)
+  );
 `);
+
+try {
+  db.exec("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'");
+} catch (e) {
+  // Column already exists
+}
+
+try {
+  db.exec("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'Hey there! I am using WhatsApp'");
+} catch (e) {
+  // Column already exists
+}
 
 export const createUser = (username: string, email: string | null, phone: string | null, password?: string) => {
   const id = uuidv4();
   const password_hash = password ? bcrypt.hashSync(password, 10) : null;
-  const stmt = db.prepare('INSERT INTO users (id, username, email, phone, password_hash, avatar_url) VALUES (?, ?, ?, ?, ?, ?)');
+  const role = username.toLowerCase() === 'admin' ? 'admin' : 'user';
+  const stmt = db.prepare('INSERT INTO users (id, username, email, phone, password_hash, avatar_url, role, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
   const avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${username}`;
-  stmt.run(id, username, email, phone, password_hash, avatar);
+  const status = 'Hey there! I am using WhatsApp';
+  stmt.run(id, username, email, phone, password_hash, avatar, role, status);
   return getUserById(id);
 };
 
@@ -54,22 +77,34 @@ export const getUserByPhone = (phone: string) => {
 };
 
 export const getUserById = (id: string) => {
-  return db.prepare('SELECT id, username, email, phone, avatar_url FROM users WHERE id = ?').get(id) as any;
+  return db.prepare('SELECT id, username, email, phone, avatar_url, role, status FROM users WHERE id = ?').get(id) as any;
 };
 
-export const updateUser = (id: string, updates: { username?: string, email?: string, phone?: string, avatar_url?: string }) => {
+export const updateUser = (id: string, updates: { username?: string, email?: string | null, phone?: string | null, avatar_url?: string, role?: string, status?: string }) => {
   const fields = [];
   const values = [];
-  if (updates.username) { fields.push('username = ?'); values.push(updates.username); }
-  if (updates.email) { fields.push('email = ?'); values.push(updates.email); }
-  if (updates.phone) { fields.push('phone = ?'); values.push(updates.phone); }
-  if (updates.avatar_url) { fields.push('avatar_url = ?'); values.push(updates.avatar_url); }
+  if (updates.username !== undefined) { fields.push('username = ?'); values.push(updates.username); }
+  if (updates.email !== undefined) { fields.push('email = ?'); values.push(updates.email); }
+  if (updates.phone !== undefined) { fields.push('phone = ?'); values.push(updates.phone); }
+  if (updates.avatar_url !== undefined) { fields.push('avatar_url = ?'); values.push(updates.avatar_url); }
+  if (updates.role !== undefined) { fields.push('role = ?'); values.push(updates.role); }
+  if (updates.status !== undefined) { fields.push('status = ?'); values.push(updates.status); }
 
   if (fields.length === 0) return getUserById(id);
 
   values.push(id);
   db.prepare(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`).run(...values);
   return getUserById(id);
+};
+
+export const getAllUsers = () => {
+  return db.prepare('SELECT id, username, email, phone, avatar_url, role, status, created_at FROM users ORDER BY created_at DESC').all() as any[];
+};
+
+export const deleteUser = (id: string) => {
+  db.prepare('DELETE FROM messages WHERE sender_id = ? OR receiver_id = ?').run(id, id);
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
+  db.prepare('DELETE FROM users WHERE id = ?').run(id);
 };
 
 export const createSession = (userId: string) => {
@@ -80,7 +115,7 @@ export const createSession = (userId: string) => {
 };
 
 export const getSession = (sessionId: string) => {
-  const session = db.prepare('SELECT * FROM sessions WHERE id = ? AND expires_at > datetime("now")').get(sessionId) as any;
+  const session = db.prepare("SELECT * FROM sessions WHERE id = ? AND expires_at > datetime('now')").get(sessionId) as any;
   if (!session) return null;
   return getUserById(session.user_id);
 };
@@ -142,4 +177,26 @@ export const markMessagesAsRead = (senderId: string, receiverId: string) => {
     SET read_at = CURRENT_TIMESTAMP 
     WHERE sender_id = ? AND receiver_id = ? AND read_at IS NULL
   `).run(senderId, receiverId);
+};
+
+export const blockUser = (userId: string, blockedUserId: string) => {
+  try {
+    db.prepare('INSERT INTO blocked_users (user_id, blocked_user_id) VALUES (?, ?)').run(userId, blockedUserId);
+    return true;
+  } catch (e) {
+    return false; // Already blocked
+  }
+};
+
+export const unblockUser = (userId: string, blockedUserId: string) => {
+  db.prepare('DELETE FROM blocked_users WHERE user_id = ? AND blocked_user_id = ?').run(userId, blockedUserId);
+};
+
+export const getBlockedUsers = (userId: string) => {
+  return db.prepare('SELECT blocked_user_id FROM blocked_users WHERE user_id = ?').all(userId) as { blocked_user_id: string }[];
+};
+
+export const isUserBlocked = (userId: string, otherUserId: string) => {
+  const result = db.prepare('SELECT 1 FROM blocked_users WHERE user_id = ? AND blocked_user_id = ?').get(userId, otherUserId);
+  return !!result;
 };

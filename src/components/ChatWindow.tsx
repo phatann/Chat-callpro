@@ -1,19 +1,29 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
-import { Send, Phone, Video, MoreVertical, Paperclip, Smile } from 'lucide-react';
+import { Send, Phone, Video, MoreVertical, Paperclip, Smile, ArrowLeft, Mic, Ban, VolumeX } from 'lucide-react';
 import { User, Message } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface ChatWindowProps {
   chatUser: User;
   messages: Message[];
   onSendMessage: (content: string) => void;
   onStartCall: (video: boolean) => void;
+  onBack: () => void;
+  isConnected: boolean;
+  wsError: string | null;
+  onClearError: () => void;
+  isTyping: boolean;
+  onTyping: () => void;
 }
 
-export default function ChatWindow({ chatUser, messages, onSendMessage, onStartCall }: ChatWindowProps) {
+export default function ChatWindow({ chatUser, messages, onSendMessage, onStartCall, onBack, isConnected, wsError, onClearError, isTyping, onTyping }: ChatWindowProps) {
   const { user } = useAuth();
   const [newMessage, setNewMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [showMenu, setShowMenu] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -21,85 +31,220 @@ export default function ChatWindow({ chatUser, messages, onSendMessage, onStartC
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, isTyping]);
+
+  useEffect(() => {
+    // Check if user is blocked
+    fetch('/api/users/me/blocked')
+      .then(res => res.json())
+      .then(data => {
+        const blockedIds = data.blocked.map((b: any) => b.blocked_user_id);
+        setIsBlocked(blockedIds.includes(chatUser.id));
+      });
+  }, [chatUser.id]);
+
+  // Auto-clear error after 5 seconds
+  useEffect(() => {
+    if (wsError) {
+      const timer = setTimeout(() => {
+        onClearError();
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [wsError, onClearError]);
 
   const handleSend = (e: FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim()) return;
+    if (!newMessage.trim() || !isConnected) return;
     onSendMessage(newMessage);
     setNewMessage('');
   };
 
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setNewMessage(e.target.value);
+    
+    // Throttle typing events
+    if (!typingTimeoutRef.current) {
+      onTyping();
+      typingTimeoutRef.current = setTimeout(() => {
+        typingTimeoutRef.current = null;
+      }, 2000);
+    }
+  };
+
+  const toggleBlock = async () => {
+    if (isBlocked) {
+      await fetch(`/api/users/${chatUser.id}/unblock`, { method: 'POST' });
+      setIsBlocked(false);
+    } else {
+      await fetch(`/api/users/${chatUser.id}/block`, { method: 'POST' });
+      setIsBlocked(true);
+    }
+    setShowMenu(false);
+  };
+
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#efeae2]">
+    <div className="flex-1 flex flex-col h-full bg-[#efeae2] relative overflow-hidden">
+      {/* Connection Status Banner */}
+      <AnimatePresence>
+        {!isConnected && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="bg-yellow-100 text-yellow-800 px-4 py-2 text-sm text-center font-medium z-20 overflow-hidden"
+          >
+            Connecting...
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      {/* Error Toast */}
+      <AnimatePresence>
+        {wsError && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: -20, x: '-50%' }}
+            className="absolute top-20 left-1/2 bg-red-500 text-white px-4 py-2 rounded-full shadow-lg z-50 text-sm font-medium"
+          >
+            {wsError}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
-      <div className="bg-white p-3 border-b border-slate-200 flex items-center justify-between shadow-sm z-10">
+      <div className="bg-white p-2 md:px-4 md:py-3 border-b border-slate-200 flex items-center justify-between shadow-sm z-10 relative">
         <div className="flex items-center gap-3">
-          <img src={chatUser.avatar_url} alt={chatUser.username} className="w-10 h-10 rounded-full bg-slate-200" />
-          <div>
-            <h2 className="font-semibold text-slate-800">{chatUser.username}</h2>
-            <p className="text-xs text-teal-600">Online</p>
+          <button onClick={onBack} className="md:hidden p-2 -ml-2 rounded-full hover:bg-slate-100 text-slate-600 transition-colors">
+            <ArrowLeft className="w-6 h-6" />
+          </button>
+          <div className="relative">
+            <img src={chatUser.avatar_url} alt={chatUser.username} className="w-10 h-10 rounded-full bg-slate-200 object-cover" />
+            <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
+          </div>
+          <div className="flex flex-col justify-center">
+            <h2 className="font-semibold text-slate-800 text-base leading-tight">{chatUser.username}</h2>
+            <p className="text-xs font-medium h-4 flex items-center">
+              {isTyping ? (
+                <span className="text-blue-500 animate-pulse">typing...</span>
+              ) : (
+                <span className="text-slate-500">Online</span>
+              )}
+            </p>
           </div>
         </div>
-        <div className="flex items-center gap-4 text-teal-600">
-          <button onClick={() => onStartCall(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-            <Phone className="w-5 h-5" />
-          </button>
-          <button onClick={() => onStartCall(true)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+        <div className="flex items-center gap-1 md:gap-2 text-slate-500 relative">
+          <button onClick={() => onStartCall(true)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-blue-500">
             <Video className="w-5 h-5" />
           </button>
-          <button className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-            <MoreVertical className="w-5 h-5 text-slate-500" />
+          <button onClick={() => onStartCall(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-blue-500">
+            <Phone className="w-5 h-5" />
           </button>
+          <div className="relative">
+            <button 
+              onClick={() => setShowMenu(!showMenu)}
+              className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+            >
+              <MoreVertical className="w-5 h-5" />
+            </button>
+            
+            <AnimatePresence>
+              {showMenu && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                  className="absolute right-0 top-full mt-2 w-48 bg-white rounded-lg shadow-xl border border-slate-100 z-50 overflow-hidden"
+                >
+                  <button 
+                    onClick={toggleBlock}
+                    className="w-full px-4 py-3 text-left hover:bg-slate-50 flex items-center gap-3 text-slate-700"
+                  >
+                    <Ban className="w-4 h-4" />
+                    {isBlocked ? 'Unblock User' : 'Block User'}
+                  </button>
+                  <button className="w-full px-4 py-3 text-left hover:bg-slate-50 flex items-center gap-3 text-slate-700">
+                    <VolumeX className="w-4 h-4" />
+                    Mute Notifications
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat">
-        {messages.map((msg) => {
+      <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-[#efeae2] bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat">
+        {messages.map((msg, index) => {
           const isMe = msg.sender_id === user?.id;
           return (
-            <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+            <motion.div 
+              key={msg.id} 
+              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.2 }}
+              className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
+            >
               <div 
-                className={`max-w-[70%] rounded-lg p-3 shadow-sm relative ${
-                  isMe ? 'bg-[#d9fdd3] rounded-tr-none' : 'bg-white rounded-tl-none'
+                className={`max-w-[85%] md:max-w-[65%] rounded-2xl px-4 py-2 shadow-sm relative text-[15px] ${
+                  isMe ? 'bg-[#dcf8c6] rounded-tr-none text-slate-900' : 'bg-white rounded-tl-none text-slate-900'
                 }`}
               >
-                <p className="text-slate-800 text-sm leading-relaxed">{msg.content}</p>
-                <span className="text-[10px] text-slate-500 block text-right mt-1">
+                <p className="leading-relaxed pb-1">{msg.content}</p>
+                <div className={`text-[10px] text-right ${isMe ? 'text-green-800/60' : 'text-slate-400'}`}>
                   {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
+                  {isMe && <span className="ml-1">✓✓</span>}
+                </div>
               </div>
-            </div>
+            </motion.div>
           );
         })}
         <div ref={messagesEndRef} />
       </div>
 
       {/* Input */}
-      <div className="bg-[#f0f2f5] p-3 flex items-center gap-2">
-        <button className="p-2 text-slate-500 hover:text-slate-600">
-          <Smile className="w-6 h-6" />
-        </button>
-        <button className="p-2 text-slate-500 hover:text-slate-600">
-          <Paperclip className="w-6 h-6" />
-        </button>
-        <form onSubmit={handleSend} className="flex-1 flex gap-2">
-          <input
-            type="text"
-            placeholder="Type a message"
-            className="flex-1 py-2 px-4 rounded-lg border-none focus:outline-none focus:ring-1 focus:ring-teal-500 bg-white"
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-          />
-          <button 
-            type="submit" 
-            className={`p-2 rounded-full transition-colors ${newMessage.trim() ? 'bg-teal-600 text-white hover:bg-teal-700' : 'text-slate-400 bg-transparent'}`}
-            disabled={!newMessage.trim()}
-          >
-            <Send className="w-5 h-5" />
-          </button>
-        </form>
+      <div className="bg-[#f0f2f5] px-4 py-3 pb-safe flex items-end gap-2">
+        {isBlocked ? (
+          <div className="w-full p-3 bg-slate-100 text-slate-500 text-center rounded-lg text-sm">
+            You blocked this contact. Tap to unblock.
+          </div>
+        ) : (
+          <>
+            <div className="flex-1 bg-white rounded-2xl flex items-center px-2 py-1 shadow-sm border border-slate-200 focus-within:ring-2 focus-within:ring-blue-500/20 transition-all">
+              <button className="p-2 text-slate-400 hover:text-slate-600 transition-colors">
+                <Smile className="w-6 h-6" />
+              </button>
+              <input
+                type="text"
+                placeholder="Message"
+                className="flex-1 py-2 px-2 border-none focus:outline-none bg-transparent text-slate-900 placeholder:text-slate-400"
+                value={newMessage}
+                onChange={handleInputChange}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend(e);
+                  }
+                }}
+              />
+              <button className="p-2 text-slate-400 hover:text-slate-600 transition-colors -rotate-45">
+                <Paperclip className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <motion.button 
+              whileTap={{ scale: 0.9 }}
+              onClick={handleSend}
+              className={`p-3 rounded-full shadow-md flex items-center justify-center transition-colors ${
+                newMessage.trim() ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-slate-200 text-slate-500'
+              }`}
+            >
+              {newMessage.trim() ? <Send className="w-5 h-5 ml-0.5" /> : <Mic className="w-5 h-5" />}
+            </motion.button>
+          </>
+        )}
       </div>
     </div>
   );

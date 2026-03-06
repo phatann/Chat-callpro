@@ -51,15 +51,34 @@ async function startServer() {
         
         if (data.type === 'chat') {
           const { receiverId, content } = data;
-          const msg = db.createMessage(userId, receiverId, content);
           
-          // Send back to sender (confirmation)
-          ws.send(JSON.stringify({ type: 'chat_ack', message: msg }));
+          // Check if sender is blocked by receiver
+          const isBlocked = db.isUserBlocked(receiverId, userId);
           
-          // Send to receiver if online
-          const receiverWs = clients.get(receiverId);
-          if (receiverWs && receiverWs.readyState === WebSocket.OPEN) {
-            receiverWs.send(JSON.stringify({ type: 'chat_new', message: msg }));
+          if (!isBlocked) {
+            const msg = db.createMessage(userId, receiverId, content);
+            
+            // Send back to sender (confirmation)
+            ws.send(JSON.stringify({ type: 'chat_ack', message: msg }));
+            
+            // Send to receiver if online
+            const receiverWs = clients.get(receiverId);
+            if (receiverWs && receiverWs.readyState === WebSocket.OPEN) {
+              receiverWs.send(JSON.stringify({ type: 'chat_new', message: msg }));
+            }
+          } else {
+             // Optionally notify sender they are blocked, or just silently fail (standard behavior)
+             // For now, we'll just ack to sender so it looks sent, but receiver never gets it
+             // Actually, standard behavior is usually single tick (sent) but not delivered.
+             // We will create the message in DB but NOT send to receiver via WS.
+             // Wait, if blocked, usually message is NOT delivered.
+             // Let's create it in DB for now so sender sees it in their history, 
+             // but receiver won't see it in theirs if we filter queries? 
+             // Or better: don't create it? 
+             // Telegram/WhatsApp: You can send, but they don't receive.
+             // Let's create it, but NOT send WS event to receiver.
+             const msg = db.createMessage(userId, receiverId, content);
+             ws.send(JSON.stringify({ type: 'chat_ack', message: msg }));
           }
         } else if (data.type === 'call_signal') {
           const { receiverId, signalData } = data;
@@ -105,7 +124,10 @@ async function startServer() {
         return res.status(400).json({ error: 'Missing fields' });
       }
       
-      const user = db.createUser(username, email, phone, password);
+      const cleanEmail = email?.trim() || null;
+      const cleanPhone = phone?.trim() || null;
+
+      const user = db.createUser(username, cleanEmail, cleanPhone, password);
       const sessionId = db.createSession(user.id);
       
       res.cookie('session_id', sessionId, { 
@@ -192,6 +214,33 @@ async function startServer() {
     res.json({ messages });
   });
 
+  app.post('/api/users/:id/block', (req, res) => {
+    const sessionId = req.cookies.session_id;
+    const currentUser = db.getSession(sessionId);
+    if (!currentUser) return res.status(401).json({ error: 'Unauthorized' });
+    
+    db.blockUser(currentUser.id, req.params.id);
+    res.json({ success: true });
+  });
+
+  app.post('/api/users/:id/unblock', (req, res) => {
+    const sessionId = req.cookies.session_id;
+    const currentUser = db.getSession(sessionId);
+    if (!currentUser) return res.status(401).json({ error: 'Unauthorized' });
+    
+    db.unblockUser(currentUser.id, req.params.id);
+    res.json({ success: true });
+  });
+
+  app.get('/api/users/me/blocked', (req, res) => {
+    const sessionId = req.cookies.session_id;
+    const currentUser = db.getSession(sessionId);
+    if (!currentUser) return res.status(401).json({ error: 'Unauthorized' });
+    
+    const blocked = db.getBlockedUsers(currentUser.id);
+    res.json({ blocked });
+  });
+
   app.post('/api/messages/:userId/read', (req, res) => {
     const sessionId = req.cookies.session_id;
     const currentUser = db.getSession(sessionId);
@@ -230,12 +279,51 @@ async function startServer() {
     const currentUser = db.getSession(sessionId);
     if (!currentUser) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { username, email, phone, avatar_url } = req.body;
+    const { username, email, phone, avatar_url, status } = req.body;
     try {
-      const updatedUser = db.updateUser(currentUser.id, { username, email, phone, avatar_url });
+      const cleanEmail = email?.trim() || null;
+      const cleanPhone = phone?.trim() || null;
+      const updatedUser = db.updateUser(currentUser.id, { username, email: cleanEmail, phone: cleanPhone, avatar_url, status });
       res.json({ user: updatedUser });
     } catch (e) {
       res.status(400).json({ error: 'Update failed. Username or email might be taken.' });
+    }
+  });
+
+  // --- Admin Routes ---
+  const requireAdmin = (req: any, res: any, next: any) => {
+    const sessionId = req.cookies.session_id;
+    const currentUser = db.getSession(sessionId);
+    if (!currentUser || currentUser.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    req.user = currentUser;
+    next();
+  };
+
+  app.get('/api/admin/users', requireAdmin, (req, res) => {
+    const users = db.getAllUsers();
+    res.json({ users });
+  });
+
+  app.put('/api/admin/users/:id', requireAdmin, (req, res) => {
+    const { username, email, phone, role } = req.body;
+    try {
+      const cleanEmail = email?.trim() || null;
+      const cleanPhone = phone?.trim() || null;
+      const updatedUser = db.updateUser(req.params.id, { username, email: cleanEmail, phone: cleanPhone, role });
+      res.json({ user: updatedUser });
+    } catch (e) {
+      res.status(400).json({ error: 'Update failed' });
+    }
+  });
+
+  app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
+    try {
+      db.deleteUser(req.params.id);
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ error: 'Delete failed' });
     }
   });
 
