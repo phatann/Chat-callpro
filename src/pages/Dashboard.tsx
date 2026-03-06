@@ -6,6 +6,7 @@ import ChatWindow from '../components/ChatWindow';
 import CallModal from '../components/CallModal';
 import ProfilePage from './ProfilePage';
 import AdminDashboard from './AdminDashboard';
+import ContactsPage from './ContactsPage';
 import AuthPage from './AuthPage';
 import { User, Message } from '../types';
 import { requestNotificationPermission, sendNotification } from '../utils/notifications';
@@ -16,6 +17,7 @@ export default function Dashboard() {
   const [selectedChatUser, setSelectedChatUser] = useState<User | null>(null);
   const [showProfile, setShowProfile] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showContacts, setShowContacts] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isInCall, setIsInCall] = useState(false);
   const [isVideoCall, setIsVideoCall] = useState(false);
@@ -77,8 +79,16 @@ export default function Dashboard() {
       fetch(`/api/messages/${selectedChatUser.id}`)
         .then(res => res.json())
         .then(data => {
-          setMessages(data.messages);
+          if (data && Array.isArray(data.messages)) {
+            setMessages(data.messages);
+          } else {
+            setMessages([]);
+          }
           markAsRead(selectedChatUser.id);
+        })
+        .catch(err => {
+          console.error('Error fetching messages:', err);
+          setMessages([]);
         });
     }
   }, [selectedChatUser]);
@@ -139,38 +149,61 @@ export default function Dashboard() {
 
   return (
     <div className="flex h-full bg-slate-100 overflow-hidden relative">
-      <div className={`h-full flex-col bg-white border-r border-slate-200 ${selectedChatUser ? 'hidden md:flex w-full md:w-[30%] min-w-[300px] max-w-[400px]' : 'flex w-full md:w-[30%] md:min-w-[300px] md:max-w-[400px]'}`}>
+      <div className={`h-full flex-col bg-white border-r border-slate-200 ${selectedChatUser || showProfile || showAdmin || showContacts ? 'hidden md:flex w-full md:w-[30%] min-w-[300px] max-w-[400px]' : 'flex w-full md:w-[30%] md:min-w-[300px] md:max-w-[400px]'}`}>
         <Sidebar 
           onSelectChat={(user) => {
             setSelectedChatUser(user);
             setShowProfile(false);
             setShowAdmin(false);
+            setShowContacts(false);
           }} 
           selectedChatId={selectedChatUser?.id} 
           onProfileClick={() => {
             setShowProfile(true);
             setShowAdmin(false);
             setSelectedChatUser(null);
+            setShowContacts(false);
           }}
           onAdminClick={() => {
             setShowAdmin(true);
             setShowProfile(false);
             setSelectedChatUser(null);
+            setShowContacts(false);
+          }}
+          onContactsClick={() => {
+            setShowContacts(true);
+            setShowProfile(false);
+            setShowAdmin(false);
+            setSelectedChatUser(null);
+          }}
+          onSettingsClick={() => {
+            setShowProfile(true);
+            setShowAdmin(false);
+            setSelectedChatUser(null);
+            setShowContacts(false);
           }}
         />
       </div>
       
-      <div className={`flex-1 flex-col h-full bg-[#efeae2] ${selectedChatUser || showProfile || showAdmin ? 'flex' : 'hidden md:flex'}`}>
+      <div className={`flex-1 flex-col h-full bg-[#efeae2] ${selectedChatUser || showProfile || showAdmin || showContacts ? 'flex' : 'hidden md:flex'}`}>
         {showAdmin && user.role === 'admin' ? (
           <AdminDashboard onBack={() => setShowAdmin(false)} />
         ) : showProfile ? (
           <ProfilePage onBack={() => setShowProfile(false)} />
+        ) : showContacts ? (
+          <ContactsPage 
+            onBack={() => setShowContacts(false)} 
+            onSelectUser={(user) => {
+              setSelectedChatUser(user);
+              setShowContacts(false);
+            }} 
+          />
         ) : selectedChatUser ? (
           <ChatWindow 
             chatUser={selectedChatUser} 
             messages={messages} 
-            onSendMessage={(content) => {
-              const sent = ws.sendMessage(selectedChatUser.id, content);
+            onSendMessage={(content, type = 'text') => {
+              const sent = ws.sendMessage(selectedChatUser.id, content, type);
               if (!sent) {
                 // Error is handled in useWebSocket and passed to ChatWindow via props if needed, 
                 // or we can just let ChatWindow display the error state from ws.error

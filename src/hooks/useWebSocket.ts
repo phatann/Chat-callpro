@@ -81,12 +81,13 @@ export const useWebSocket = (userId: string | undefined, callbacks?: {
     };
   }, [userId]);
 
-  const sendMessage = useCallback((receiverId: string, content: string) => {
+  const sendMessage = useCallback((receiverId: string, content: string, type: 'text' | 'image' | 'video' | 'audio' = 'text') => {
     if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({
         type: 'chat',
         receiverId,
-        content
+        content,
+        msgType: type
       }));
       return true;
     } else {

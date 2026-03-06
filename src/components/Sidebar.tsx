@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Menu, Shield, X, Check, CheckCheck } from 'lucide-react';
+import { Search, Menu, Shield, X, Check, CheckCheck, Settings, Bell, Moon, Sun, LogOut, Users, BadgeCheck } from 'lucide-react';
 import { Chat, User } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -9,19 +9,65 @@ interface SidebarProps {
   selectedChatId?: string;
   onProfileClick: () => void;
   onAdminClick?: () => void;
+  onContactsClick: () => void;
+  onSettingsClick: () => void;
 }
 
-export default function Sidebar({ onSelectChat, selectedChatId, onProfileClick, onAdminClick }: SidebarProps) {
-  const { user } = useAuth();
+export default function Sidebar({ onSelectChat, selectedChatId, onProfileClick, onAdminClick, onContactsClick, onSettingsClick }: SidebarProps) {
+  const { user, logout } = useAuth();
   const [chats, setChats] = useState<Chat[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [darkMode, setDarkMode] = useState(false);
+
+  useEffect(() => {
+    // Load preferences
+    const storedNotifs = localStorage.getItem('notificationsEnabled');
+    if (storedNotifs !== null) setNotificationsEnabled(JSON.parse(storedNotifs));
+
+    const storedTheme = localStorage.getItem('darkMode');
+    if (storedTheme !== null) {
+      setDarkMode(JSON.parse(storedTheme));
+      if (JSON.parse(storedTheme)) {
+        document.documentElement.classList.add('dark');
+      }
+    }
+  }, []);
+
+  const toggleNotifications = () => {
+    const newValue = !notificationsEnabled;
+    setNotificationsEnabled(newValue);
+    localStorage.setItem('notificationsEnabled', JSON.stringify(newValue));
+  };
+
+  const toggleTheme = () => {
+    const newValue = !darkMode;
+    setDarkMode(newValue);
+    localStorage.setItem('darkMode', JSON.stringify(newValue));
+    if (newValue) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  };
 
   const fetchChats = () => {
     fetch('/api/chats')
       .then(res => res.json())
-      .then(data => setChats(data.chats));
+      .then(data => {
+        if (data && Array.isArray(data.chats)) {
+          setChats(data.chats);
+        } else {
+          setChats([]);
+        }
+      })
+      .catch(err => {
+        console.error('Error fetching chats:', err);
+        setChats([]);
+      });
   };
 
   useEffect(() => {
@@ -41,14 +87,24 @@ export default function Sidebar({ onSelectChat, selectedChatId, onProfileClick, 
     const timeoutId = setTimeout(() => {
       fetch(`/api/users/search?q=${searchQuery}`)
         .then(res => res.json())
-        .then(data => setSearchResults(data.users));
+        .then(data => {
+          if (data && Array.isArray(data.users)) {
+            setSearchResults(data.users);
+          } else {
+            setSearchResults([]);
+          }
+        })
+        .catch(err => {
+          console.error('Error searching users:', err);
+          setSearchResults([]);
+        });
     }, 300);
 
     return () => clearTimeout(timeoutId);
   }, [searchQuery]);
 
   return (
-    <div className="w-full h-full flex flex-col bg-white border-r border-slate-200">
+    <div className="w-full h-full flex flex-col bg-white border-r border-slate-200 relative">
       {/* Header */}
       <div className="h-16 flex items-center justify-between px-4 bg-[#f0f2f5] shrink-0 border-b border-slate-200">
         <button 
@@ -62,7 +118,14 @@ export default function Sidebar({ onSelectChat, selectedChatId, onProfileClick, 
           />
         </button>
         
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 relative">
+          <button 
+            onClick={onContactsClick}
+            className="p-2 rounded-full hover:bg-slate-200 text-slate-600 transition-colors"
+            title="Contacts"
+          >
+            <Users className="w-5 h-5" />
+          </button>
           {user?.role === 'admin' && (
             <button 
               onClick={onAdminClick}
@@ -72,9 +135,78 @@ export default function Sidebar({ onSelectChat, selectedChatId, onProfileClick, 
               <Shield className="w-5 h-5" />
             </button>
           )}
-          <button className="p-2 rounded-full hover:bg-slate-200 text-slate-600 transition-colors">
+          <button 
+            onClick={() => setShowSettings(!showSettings)}
+            className={`p-2 rounded-full hover:bg-slate-200 text-slate-600 transition-colors ${showSettings ? 'bg-slate-200' : ''}`}
+          >
             <Menu className="w-5 h-5" />
           </button>
+
+          {/* Settings Menu */}
+          <AnimatePresence>
+            {showSettings && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-xl border border-slate-100 z-50 overflow-hidden origin-top-right"
+              >
+                <div className="p-4 border-b border-slate-100">
+                  <h3 className="font-semibold text-slate-800">Settings</h3>
+                  <p className="text-xs text-slate-500">{user?.email || user?.phone}</p>
+                </div>
+                
+                <div className="py-2">
+                  <button 
+                    onClick={() => {
+                      onSettingsClick();
+                      setShowSettings(false);
+                    }}
+                    className="w-full px-4 py-3 flex items-center gap-3 text-slate-700 hover:bg-slate-50 transition-colors"
+                  >
+                    <Settings className="w-4 h-4" />
+                    <span className="text-sm">Settings</span>
+                  </button>
+
+                  <button 
+                    onClick={toggleNotifications}
+                    className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 text-slate-700">
+                      <Bell className="w-4 h-4" />
+                      <span className="text-sm">Notifications</span>
+                    </div>
+                    <div className={`w-9 h-5 rounded-full relative transition-colors ${notificationsEnabled ? 'bg-blue-500' : 'bg-slate-300'}`}>
+                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${notificationsEnabled ? 'left-5' : 'left-1'}`} />
+                    </div>
+                  </button>
+
+                  <button 
+                    onClick={toggleTheme}
+                    className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 text-slate-700">
+                      {darkMode ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+                      <span className="text-sm">Dark Mode</span>
+                    </div>
+                    <div className={`w-9 h-5 rounded-full relative transition-colors ${darkMode ? 'bg-blue-500' : 'bg-slate-300'}`}>
+                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${darkMode ? 'left-5' : 'left-1'}`} />
+                    </div>
+                  </button>
+
+                  <div className="h-px bg-slate-100 my-1" />
+
+                  <button 
+                    onClick={logout}
+                    className="w-full px-4 py-3 flex items-center gap-3 text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span className="text-sm font-medium">Log Out</span>
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
       
@@ -140,7 +272,12 @@ export default function Sidebar({ onSelectChat, selectedChatId, onProfileClick, 
                 >
                   <img src={result.avatar_url} alt={result.username} className="w-12 h-12 rounded-full object-cover mr-3 bg-slate-200" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-slate-900 font-medium truncate text-[15px]">{result.username}</p>
+                    <div className="flex items-center gap-1">
+                      <p className="text-slate-900 font-medium truncate text-[15px]">{result.username}</p>
+                      {result.verified === 1 && (
+                        <BadgeCheck className="w-4 h-4 text-blue-500 fill-blue-500 text-white" />
+                      )}
+                    </div>
                     {user?.role === 'admin' && (
                       <p className="text-slate-500 text-xs truncate">{result.email || result.phone}</p>
                     )}
@@ -173,7 +310,8 @@ export default function Sidebar({ onSelectChat, selectedChatId, onProfileClick, 
                     username: chat.username, 
                     avatar_url: chat.avatar_url, 
                     email: null, 
-                    phone: null 
+                    phone: null,
+                    verified: chat.verified
                   })}
                   className={`flex items-center px-3 py-3 hover:bg-[#f5f6f6] cursor-pointer transition-colors group border-b border-slate-50 ${selectedChatId === chat.id ? 'bg-[#f0f2f5]' : ''}`}
                 >
@@ -182,7 +320,12 @@ export default function Sidebar({ onSelectChat, selectedChatId, onProfileClick, 
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-baseline mb-1">
-                      <h3 className="font-medium truncate text-slate-900 text-[16px]">{chat.username}</h3>
+                      <div className="flex items-center gap-1">
+                        <h3 className="font-medium truncate text-slate-900 text-[16px]">{chat.username}</h3>
+                        {chat.verified === 1 && (
+                          <BadgeCheck className="w-4 h-4 text-blue-500 fill-blue-500 text-white" />
+                        )}
+                      </div>
                       <span className={`text-xs whitespace-nowrap ml-2 ${chat.unread_count > 0 ? 'text-green-500 font-medium' : 'text-slate-400'}`}>
                         {new Date(chat.last_message_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>

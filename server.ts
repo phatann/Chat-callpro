@@ -8,7 +8,19 @@ import { fileURLToPath } from 'url';
 import * as db from './server/db';
 import bcrypt from 'bcryptjs';
 
+import { GoogleGenAI } from "@google/genai";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Initialize Gemini AI
+const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+if (!apiKey) {
+  console.warn("Warning: GEMINI_API_KEY or API_KEY not found in environment variables. AI features may not work.");
+}
+const ai = new GoogleGenAI({ apiKey: apiKey });
+
+// Ensure AI User exists
+db.ensureAIUser();
 
 async function startServer() {
   const app = express();
@@ -36,6 +48,10 @@ async function startServer() {
       if (cookies.session_id) {
         const user = db.getSession(cookies.session_id);
         if (user) {
+          if (user.banned) {
+            ws.close(1008, 'User is banned');
+            return;
+          }
           userId = user.id;
           clients.set(userId, ws);
           console.log(`User ${user.username} connected via WS`);
@@ -46,38 +62,70 @@ async function startServer() {
     ws.on('message', (message) => {
       if (!userId) return;
       
+      // Re-check ban status on every message (optional but safer)
+      const user = db.getUserById(userId);
+      if (user && user.banned) {
+        ws.close(1008, 'User is banned');
+        return;
+      }
+      
       try {
         const data = JSON.parse(message.toString());
         
         if (data.type === 'chat') {
-          const { receiverId, content } = data;
+          const { receiverId, content, msgType } = data; // msgType optional, default 'text'
           
           // Check if sender is blocked by receiver
           const isBlocked = db.isUserBlocked(receiverId, userId);
           
           if (!isBlocked) {
-            const msg = db.createMessage(userId, receiverId, content);
+            const msg = db.createMessage(userId, receiverId, content, msgType || 'text');
             
             // Send back to sender (confirmation)
             ws.send(JSON.stringify({ type: 'chat_ack', message: msg }));
             
-            // Send to receiver if online
-            const receiverWs = clients.get(receiverId);
-            if (receiverWs && receiverWs.readyState === WebSocket.OPEN) {
-              receiverWs.send(JSON.stringify({ type: 'chat_new', message: msg }));
+            // Check if receiver is AI Assistant
+            if (receiverId === 'ai-assistant') {
+              (async () => {
+                try {
+                  // Simulate "typing" delay slightly for realism
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                  
+                  const prompt = `You are Alpha 3.1, an intelligent AI assistant in a chat application.
+                  Your goal is to help users with their problems and answer their questions.
+                  Be helpful, polite, and concise.
+                  
+                  User: ${content}`;
+                  
+                  const result = await ai.models.generateContent({
+                    model: "gemini-2.5-flash",
+                    contents: prompt,
+                  });
+                  const responseText = result.text;
+                  
+                  const aiMsg = db.createMessage('ai-assistant', userId, responseText || "I'm sorry, I couldn't generate a response.", 'text');
+                  
+                  if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'chat_new', message: aiMsg }));
+                  }
+                } catch (error) {
+                  console.error('AI Response Error:', error);
+                  const errorMsg = db.createMessage('ai-assistant', userId, "I'm having trouble processing that right now. Please try again later.", 'text');
+                  if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'chat_new', message: errorMsg }));
+                  }
+                }
+              })();
+            } else {
+              // Send to receiver if online
+              const receiverWs = clients.get(receiverId);
+              if (receiverWs && receiverWs.readyState === WebSocket.OPEN) {
+                receiverWs.send(JSON.stringify({ type: 'chat_new', message: msg }));
+              }
             }
           } else {
-             // Optionally notify sender they are blocked, or just silently fail (standard behavior)
-             // For now, we'll just ack to sender so it looks sent, but receiver never gets it
-             // Actually, standard behavior is usually single tick (sent) but not delivered.
-             // We will create the message in DB but NOT send to receiver via WS.
-             // Wait, if blocked, usually message is NOT delivered.
-             // Let's create it in DB for now so sender sees it in their history, 
-             // but receiver won't see it in theirs if we filter queries? 
-             // Or better: don't create it? 
-             // Telegram/WhatsApp: You can send, but they don't receive.
-             // Let's create it, but NOT send WS event to receiver.
-             const msg = db.createMessage(userId, receiverId, content);
+             // ... blocked logic ...
+             const msg = db.createMessage(userId, receiverId, content, msgType || 'text');
              ws.send(JSON.stringify({ type: 'chat_ack', message: msg }));
           }
         } else if (data.type === 'call_signal') {
@@ -127,6 +175,12 @@ async function startServer() {
       const cleanEmail = email?.trim() || null;
       const cleanPhone = phone?.trim() || null;
 
+      // Check if user already exists
+      const existingUser = cleanEmail ? db.getUserByEmail(cleanEmail) : db.getUserByPhone(cleanPhone!);
+      if (existingUser) {
+        return res.status(400).json({ error: 'User already exists' });
+      }
+
       const user = db.createUser(username, cleanEmail, cleanPhone, password);
       const sessionId = db.createSession(user.id);
       
@@ -163,6 +217,10 @@ async function startServer() {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
       
+      if (user.banned) {
+        return res.status(403).json({ error: 'This account has been banned.' });
+      }
+
       const sessionId = db.createSession(user.id);
       res.cookie('session_id', sessionId, { 
         httpOnly: true, 
@@ -263,6 +321,15 @@ async function startServer() {
     res.json({ users });
   });
 
+  app.get('/api/users', (req, res) => {
+    const sessionId = req.cookies.session_id;
+    const currentUser = db.getSession(sessionId);
+    if (!currentUser) return res.status(401).json({ error: 'Unauthorized' });
+    
+    const users = db.getContacts(currentUser.id);
+    res.json({ users });
+  });
+
   app.get('/api/users/:id', (req, res) => {
     const sessionId = req.cookies.session_id;
     const currentUser = db.getSession(sessionId);
@@ -279,11 +346,24 @@ async function startServer() {
     const currentUser = db.getSession(sessionId);
     if (!currentUser) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { username, email, phone, avatar_url, status } = req.body;
+    const { username, email, phone, avatar_url, status, password } = req.body;
     try {
       const cleanEmail = email?.trim() || null;
       const cleanPhone = phone?.trim() || null;
-      const updatedUser = db.updateUser(currentUser.id, { username, email: cleanEmail, phone: cleanPhone, avatar_url, status });
+      
+      let password_hash = undefined;
+      if (password && password.trim()) {
+        password_hash = bcrypt.hashSync(password, 10);
+      }
+
+      const updatedUser = db.updateUser(currentUser.id, { 
+        username, 
+        email: cleanEmail, 
+        phone: cleanPhone, 
+        avatar_url, 
+        status,
+        password_hash
+      });
       res.json({ user: updatedUser });
     } catch (e) {
       res.status(400).json({ error: 'Update failed. Username or email might be taken.' });
@@ -307,14 +387,61 @@ async function startServer() {
   });
 
   app.put('/api/admin/users/:id', requireAdmin, (req, res) => {
-    const { username, email, phone, role } = req.body;
+    const { username, email, phone, role, banned } = req.body;
     try {
       const cleanEmail = email?.trim() || null;
       const cleanPhone = phone?.trim() || null;
-      const updatedUser = db.updateUser(req.params.id, { username, email: cleanEmail, phone: cleanPhone, role });
+      const updatedUser = db.updateUser(req.params.id, { username, email: cleanEmail, phone: cleanPhone, role, banned });
       res.json({ user: updatedUser });
     } catch (e) {
       res.status(400).json({ error: 'Update failed' });
+    }
+  });
+
+  app.post('/api/admin/users/:id/ban', requireAdmin, (req, res) => {
+    try {
+      const updatedUser = db.updateUser(req.params.id, { banned: 1 });
+      
+      // Close active WS connection if any
+      const ws = clients.get(req.params.id);
+      if (ws) {
+        ws.close(1008, 'User is banned');
+        clients.delete(req.params.id);
+      }
+      
+      // Delete all sessions for this user
+      db.deleteUserSessions(req.params.id);
+      
+      res.json({ user: updatedUser });
+    } catch (e) {
+      res.status(500).json({ error: 'Ban failed' });
+    }
+  });
+
+  app.post('/api/admin/users/:id/unban', requireAdmin, (req, res) => {
+    try {
+      const updatedUser = db.updateUser(req.params.id, { banned: 0 });
+      res.json({ user: updatedUser });
+    } catch (e) {
+      res.status(500).json({ error: 'Unban failed' });
+    }
+  });
+
+  app.post('/api/admin/users/:id/verify', requireAdmin, (req, res) => {
+    try {
+      const updatedUser = db.updateUser(req.params.id, { verified: 1 });
+      res.json({ user: updatedUser });
+    } catch (e) {
+      res.status(500).json({ error: 'Verification failed' });
+    }
+  });
+
+  app.post('/api/admin/users/:id/unverify', requireAdmin, (req, res) => {
+    try {
+      const updatedUser = db.updateUser(req.params.id, { verified: 0 });
+      res.json({ user: updatedUser });
+    } catch (e) {
+      res.status(500).json({ error: 'Unverification failed' });
     }
   });
 
@@ -324,6 +451,30 @@ async function startServer() {
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: 'Delete failed' });
+    }
+  });
+
+  app.post('/api/admin/ai-support', requireAdmin, async (req, res) => {
+    const { query } = req.body;
+    if (!query) return res.status(400).json({ error: 'Query required' });
+
+    try {
+      const prompt = `You are a helpful AI assistant for the admin of a chat application. 
+      The admin is asking for help with user problems or system management.
+      Answer concisely and professionally.
+      
+      User Query: ${query}`;
+      
+      const result = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+      });
+      const text = result.text;
+      
+      res.json({ answer: text });
+    } catch (e) {
+      console.error('AI Error:', e);
+      res.status(500).json({ error: 'AI service unavailable' });
     }
   });
 
