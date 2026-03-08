@@ -13,7 +13,7 @@ export interface Message {
   sender_id: string;
   receiver_id: string;
   content: string;
-  type: 'text' | 'image' | 'video' | 'audio' | 'call_start' | 'call_end';
+  type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'call_start' | 'call_end';
   created_at: string;
   read_at?: string;
 }
