@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Shield, Trash2, Edit2, X, Check, ArrowLeft, Ban, Unlock, Activity, MessageSquare, BadgeCheck, Bot, Sparkles, Send, Search, Filter, MoreHorizontal, UserCheck, UserX, Lock, LayoutDashboard, Users, UserCog } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -11,7 +11,7 @@ export default function AdminDashboard({ onBack }: AdminDashboardProps) {
   const { user } = useAuth();
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'banned' | 'verified'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'banned' | 'verified' | 'controls'>('overview');
   
   // Edit State
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -21,6 +21,11 @@ export default function AdminDashboard({ onBack }: AdminDashboardProps) {
   
   // Search State
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Controls Tab State
+  const [controlSearch, setControlSearch] = useState('');
+  const [targetUser, setTargetUser] = useState<any | null>(null);
+  const [controlLoading, setControlLoading] = useState(false);
 
   // AI Assistant State
   const [aiQuery, setAiQuery] = useState('');
@@ -137,7 +142,56 @@ export default function AdminDashboard({ onBack }: AdminDashboardProps) {
     }
   };
 
-  const handleAiAsk = async (e: React.FormEvent) => {
+  const handleControlSearch = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!controlSearch.trim()) return;
+    
+    setControlLoading(true);
+    setTargetUser(null);
+    
+    // Simulate search by filtering existing users state (since we have all users)
+    const found = users.find(u => 
+      u.email?.toLowerCase() === controlSearch.toLowerCase() || 
+      u.username.toLowerCase() === controlSearch.toLowerCase()
+    );
+
+    setTimeout(() => {
+      setTargetUser(found || null);
+      setControlLoading(false);
+    }, 500);
+  };
+
+  const executeControlAction = async (action: string) => {
+    if (!targetUser) return;
+    
+    switch (action) {
+      case 'ban':
+        await handleBan(targetUser.id, 0);
+        setTargetUser((prev: any) => ({...prev, banned: 1}));
+        break;
+      case 'unban':
+        await handleBan(targetUser.id, 1);
+        setTargetUser((prev: any) => ({...prev, banned: 0}));
+        break;
+      case 'verify':
+        await handleVerify(targetUser.id, 0);
+        setTargetUser((prev: any) => ({...prev, verified: 1}));
+        break;
+      case 'revoke':
+        await handleVerify(targetUser.id, 1);
+        setTargetUser((prev: any) => ({...prev, verified: 0}));
+        break;
+      case 'reset':
+        setPasswordResetId(targetUser.id);
+        break;
+      case 'delete':
+        await handleDelete(targetUser.id);
+        setTargetUser(null);
+        break;
+    }
+  };
+
+  const handleAiAsk = async (e: FormEvent) => {
     e.preventDefault();
     if (!aiQuery.trim()) return;
 
@@ -163,8 +217,8 @@ export default function AdminDashboard({ onBack }: AdminDashboardProps) {
     }
   };
 
-  if (user?.role !== 'admin') {
-    return <div className="p-8 text-center text-red-500">Access Denied. Admin only.</div>;
+  if (user?.role !== 'admin' && user?.role !== 'manager') {
+    return <div className="p-8 text-center text-red-500">Access Denied. Admin or Manager only.</div>;
   }
 
   const filteredUsers = users.filter(u => {
@@ -185,469 +239,486 @@ export default function AdminDashboard({ onBack }: AdminDashboardProps) {
   const TabButton = ({ id, label, icon: Icon }: any) => (
     <button
       onClick={() => setActiveTab(id)}
-      className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
+      className={`flex items-center gap-2 px-6 py-1.5 text-xs font-medium border-r border-t border-l border-slate-300 -mb-px select-none ${
         activeTab === id 
-          ? 'border-blue-600 text-blue-600 bg-blue-50/50' 
-          : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+          ? 'bg-white text-slate-900 font-bold border-t-2 border-t-blue-600 z-10' 
+          : 'bg-slate-100 text-slate-500 hover:bg-slate-50 border-b border-b-slate-300'
       }`}
     >
-      <Icon className="w-4 h-4" />
+      <Icon className="w-3.5 h-3.5" />
       {label}
     </button>
   );
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-50 relative">
-      {/* Header */}
-      <div className="bg-white px-6 py-4 flex items-center justify-between border-b border-slate-200 shadow-sm z-10">
-        <div className="flex items-center gap-4">
+    <div className="flex-1 flex flex-col h-full bg-[#f0f0f0] font-sans text-sm relative">
+      {/* Toolbar / Menu Bar */}
+      <div className="bg-[#f3f3f3] px-2 py-1 flex items-center justify-between border-b border-slate-300 shadow-sm z-10 select-none">
+        <div className="flex items-center gap-2">
           <button 
             onClick={onBack} 
-            className="p-2 -ml-2 rounded-full hover:bg-slate-100 text-slate-600 transition-colors"
+            className="p-1 hover:bg-slate-200 border border-transparent hover:border-slate-300 rounded-sm text-slate-600 transition-colors"
+            title="Go Back"
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ArrowLeft className="w-4 h-4" />
           </button>
-          <div>
-            <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-              <Shield className="w-5 h-5 text-blue-600" />
-              Admin Panel
-            </h1>
-            <p className="text-xs text-slate-500 mt-0.5 font-medium">Advanced Control System</p>
+          <div className="h-4 w-px bg-slate-300 mx-1" />
+          <div className="flex items-center gap-2 px-2">
+            <Shield className="w-4 h-4 text-slate-700" />
+            <span className="font-bold text-slate-700 tracking-tight">SYS_ADMIN_PANEL_V3.1</span>
           </div>
         </div>
-        <button 
-          onClick={() => setShowAiPanel(!showAiPanel)}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all border shadow-sm ${showAiPanel ? 'bg-purple-50 border-purple-200 text-purple-700 shadow-purple-100' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-slate-300'}`}
-        >
-          <Sparkles className={`w-4 h-4 ${showAiPanel ? 'text-purple-600' : 'text-slate-400'}`} />
-          <span className="font-semibold text-sm">AI Assistant</span>
-        </button>
+        <div className="flex items-center gap-2">
+           <div className="px-2 py-0.5 bg-white border border-slate-300 text-[10px] font-mono text-slate-500">
+              {new Date().toISOString().split('T')[0]}
+           </div>
+           <button 
+            onClick={() => setShowAiPanel(!showAiPanel)}
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs border rounded-sm transition-all ${
+              showAiPanel 
+                ? 'bg-purple-100 border-purple-300 text-purple-800' 
+                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            <Sparkles className="w-3 h-3" />
+            <span>AI_ASSIST</span>
+          </button>
+        </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="bg-white border-b border-slate-200 px-6 flex items-center gap-2 overflow-x-auto no-scrollbar">
-        <TabButton id="overview" label="Overview" icon={LayoutDashboard} />
-        <TabButton id="users" label="User Management" icon={UserCog} />
-        <TabButton id="banned" label="Banned Users" icon={Ban} />
-        <TabButton id="verified" label="Verified Users" icon={BadgeCheck} />
+      {/* Formula Bar / Search Area */}
+      <div className="bg-white border-b border-slate-300 p-2 flex items-center gap-2">
+         <div className="px-2 py-1 bg-slate-100 border border-slate-300 text-xs font-mono text-slate-500 w-24 text-center select-none">
+            FX:SEARCH
+         </div>
+         <div className="flex-1 relative">
+            <input 
+              type="text" 
+              className="w-full h-7 px-2 text-sm border border-slate-300 focus:border-blue-500 focus:outline-none font-mono"
+              placeholder="Query database..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar pb-20">
-          
-          {/* Overview Tab */}
-          {activeTab === 'overview' && (
-            <div className="space-y-8">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition-shadow"
-                >
-                  <div>
-                    <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Total Users</p>
-                    <p className="text-2xl font-bold text-slate-800 mt-1">{totalUsers}</p>
-                  </div>
-                  <div className="p-3 bg-blue-50 rounded-xl">
-                    <Users className="w-6 h-6 text-blue-600" />
-                  </div>
-                </motion.div>
+      {/* Workspace Area */}
+      <div className="flex-1 flex flex-col overflow-hidden p-2">
+        
+        {/* Tabs Container */}
+        <div className="flex items-end border-b border-slate-300 px-2 gap-1">
+          <TabButton id="overview" label="DASHBOARD" icon={LayoutDashboard} />
+          <TabButton id="users" label="USER_DB" icon={UserCog} />
+          <TabButton id="banned" label="BLACKLIST" icon={Ban} />
+          <TabButton id="verified" label="VERIFIED_LIST" icon={BadgeCheck} />
+          <TabButton id="controls" label="CONTROLS" icon={Shield} />
+        </div>
 
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 }}
-                  className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition-shadow"
-                >
-                  <div>
-                    <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Active Users</p>
-                    <p className="text-2xl font-bold text-slate-800 mt-1">{activeUsers}</p>
-                  </div>
-                  <div className="p-3 bg-green-50 rounded-xl">
-                    <Activity className="w-6 h-6 text-green-600" />
-                  </div>
-                </motion.div>
+        {/* Content Pane */}
+        <div className="flex-1 bg-white border-l border-r border-b border-slate-300 overflow-hidden flex flex-col shadow-sm">
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
+            
+            {/* Controls Tab */}
+            {activeTab === 'controls' && (
+              <div className="max-w-2xl mx-auto">
+                <div className="bg-slate-100 border border-slate-300 p-4 mb-6">
+                  <div className="text-xs font-mono font-bold text-slate-500 mb-2 uppercase">Target Identification</div>
+                  <form onSubmit={handleControlSearch} className="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={controlSearch}
+                      onChange={(e) => setControlSearch(e.target.value)}
+                      placeholder="ENTER_USERNAME_OR_EMAIL"
+                      className="flex-1 px-3 py-2 border border-slate-300 font-mono text-sm focus:outline-none focus:border-blue-600 uppercase"
+                    />
+                    <button 
+                      type="submit"
+                      disabled={controlLoading}
+                      className="px-4 py-2 bg-slate-700 text-white font-mono text-xs font-bold hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      {controlLoading ? 'SCANNING...' : 'LOCATE_TARGET'}
+                    </button>
+                  </form>
+                </div>
 
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2 }}
-                  className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition-shadow"
-                >
-                  <div>
-                    <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Banned</p>
-                    <p className="text-2xl font-bold text-slate-800 mt-1">{bannedUsers}</p>
-                  </div>
-                  <div className="p-3 bg-red-50 rounded-xl">
-                    <Ban className="w-6 h-6 text-red-600" />
-                  </div>
-                </motion.div>
+                {targetUser ? (
+                  <div className="border-2 border-slate-800 bg-white p-1 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.1)]">
+                    <div className="bg-slate-800 text-white px-2 py-1 text-xs font-mono font-bold flex justify-between">
+                      <span>TARGET_ACQUIRED: {targetUser.id}</span>
+                      <span className={targetUser.banned ? 'text-red-400' : 'text-green-400'}>
+                        {targetUser.banned ? 'STATUS: RESTRICTED' : 'STATUS: ACTIVE'}
+                      </span>
+                    </div>
+                    
+                    <div className="p-4 grid grid-cols-[100px_1fr] gap-6">
+                      <div className="border border-slate-300 bg-slate-50 p-1">
+                        <img src={targetUser.avatar_url} alt="" className="w-full h-full object-cover grayscale contrast-125" />
+                      </div>
+                      <div className="font-mono text-xs space-y-2">
+                        <div className="grid grid-cols-[100px_1fr] border-b border-slate-200 pb-1">
+                          <span className="text-slate-500">USERNAME:</span>
+                          <span className="font-bold">{targetUser.username}</span>
+                        </div>
+                        <div className="grid grid-cols-[100px_1fr] border-b border-slate-200 pb-1">
+                          <span className="text-slate-500">EMAIL:</span>
+                          <span>{targetUser.email || 'N/A'}</span>
+                        </div>
+                        <div className="grid grid-cols-[100px_1fr] border-b border-slate-200 pb-1">
+                          <span className="text-slate-500">ROLE:</span>
+                          <span className="uppercase">{targetUser.role}</span>
+                        </div>
+                        <div className="grid grid-cols-[100px_1fr] border-b border-slate-200 pb-1">
+                          <span className="text-slate-500">VERIFIED:</span>
+                          <span className={targetUser.verified ? 'text-blue-600 font-bold' : 'text-slate-400'}>
+                            {targetUser.verified ? 'TRUE' : 'FALSE'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
 
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.3 }}
-                  className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition-shadow"
-                >
-                  <div>
-                    <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Verified</p>
-                    <p className="text-2xl font-bold text-slate-800 mt-1">{verifiedUsers}</p>
+                    <div className="bg-slate-100 border-t border-slate-300 p-4">
+                      <div className="text-[10px] font-mono font-bold text-slate-400 mb-3 uppercase tracking-wider">Available Actions</div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        {targetUser.banned ? (
+                          <button onClick={() => executeControlAction('unban')} className="p-2 border border-green-600 bg-green-50 text-green-700 font-mono text-xs font-bold hover:bg-green-100 flex items-center justify-center gap-2">
+                            <Check className="w-3 h-3" /> UNBAN_USER
+                          </button>
+                        ) : (
+                          <button onClick={() => executeControlAction('ban')} className="p-2 border border-red-600 bg-red-50 text-red-700 font-mono text-xs font-bold hover:bg-red-100 flex items-center justify-center gap-2">
+                            <Ban className="w-3 h-3" /> BAN_USER
+                          </button>
+                        )}
+
+                        {targetUser.verified ? (
+                          <button onClick={() => executeControlAction('revoke')} className="p-2 border border-orange-400 bg-orange-50 text-orange-700 font-mono text-xs font-bold hover:bg-orange-100 flex items-center justify-center gap-2">
+                            <X className="w-3 h-3" /> REVOKE_VERIFY
+                          </button>
+                        ) : (
+                          <button onClick={() => executeControlAction('verify')} className="p-2 border border-blue-600 bg-blue-50 text-blue-700 font-mono text-xs font-bold hover:bg-blue-100 flex items-center justify-center gap-2">
+                            <BadgeCheck className="w-3 h-3" /> VERIFY_USER
+                          </button>
+                        )}
+
+                        <button onClick={() => executeControlAction('reset')} className="p-2 border border-slate-400 bg-white text-slate-700 font-mono text-xs font-bold hover:bg-slate-50 flex items-center justify-center gap-2">
+                          <Lock className="w-3 h-3" /> RESET_PASS
+                        </button>
+
+                        <button onClick={() => executeControlAction('delete')} className="p-2 border border-slate-400 bg-slate-200 text-slate-600 font-mono text-xs font-bold hover:bg-red-600 hover:text-white hover:border-red-600 flex items-center justify-center gap-2 transition-colors">
+                          <Trash2 className="w-3 h-3" /> DELETE_RECORD
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="p-3 bg-purple-50 rounded-xl">
-                    <BadgeCheck className="w-6 h-6 text-purple-600" />
+                ) : controlSearch && !controlLoading && (
+                  <div className="p-8 text-center border border-dashed border-slate-300 text-slate-400 font-mono text-xs">
+                    TARGET_NOT_FOUND_IN_DATABASE
                   </div>
-                </motion.div>
+                )}
               </div>
+            )}
 
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <h3 className="text-lg font-bold text-slate-800 mb-4">Recent Activity</h3>
-                <div className="text-slate-500 text-sm italic">System logs and activity tracking coming soon...</div>
-              </div>
-            </div>
-          )}
+            {/* Overview Tab */}
+            {activeTab === 'overview' && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-slate-300 border border-slate-300">
+                  {[
+                    { label: 'TOTAL_RECORDS', value: totalUsers, icon: Users, color: 'text-blue-700' },
+                    { label: 'ACTIVE_SESSIONS', value: activeUsers, icon: Activity, color: 'text-green-700' },
+                    { label: 'RESTRICTED', value: bannedUsers, icon: Ban, color: 'text-red-700' },
+                    { label: 'VERIFIED_ACCOUNTS', value: verifiedUsers, icon: BadgeCheck, color: 'text-purple-700' }
+                  ].map((stat, i) => (
+                    <div key={i} className="bg-white p-3 flex items-start justify-between">
+                      <div>
+                        <div className="text-[10px] font-mono text-slate-500 uppercase mb-1">{stat.label}</div>
+                        <div className={`text-2xl font-mono font-bold ${stat.color}`}>{stat.value}</div>
+                      </div>
+                      <stat.icon className={`w-5 h-5 opacity-50 ${stat.color}`} />
+                    </div>
+                  ))}
+                </div>
 
-          {/* User Management / Banned / Verified Tabs */}
-          {activeTab !== 'overview' && (
-            <div className="space-y-6">
-              <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                <div className="relative w-full md:w-96 group">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
-                  <input 
-                    type="text" 
-                    placeholder="Search users..." 
-                    className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm transition-all shadow-sm"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
+                <div className="border border-slate-300">
+                  <div className="bg-slate-100 px-3 py-1.5 border-b border-slate-300 text-xs font-bold text-slate-700 uppercase">
+                    System_Log_Stream
+                  </div>
+                  <div className="p-4 bg-slate-50 min-h-[200px] font-mono text-xs text-slate-500">
+                    <div className="flex gap-4 border-b border-slate-200 py-1">
+                      <span className="text-slate-400">[{new Date().toLocaleTimeString()}]</span>
+                      <span>System initialized. Waiting for input...</span>
+                    </div>
+                    <div className="flex gap-4 border-b border-slate-200 py-1">
+                      <span className="text-slate-400">[{new Date().toLocaleTimeString()}]</span>
+                      <span>Database connection established.</span>
+                    </div>
+                  </div>
                 </div>
               </div>
+            )}
 
-              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            {/* Data Grid Views */}
+            {activeTab !== 'overview' && activeTab !== 'controls' && (
+              <div className="h-full flex flex-col">
                 {loading ? (
-                  <div className="p-12 text-center text-slate-500 flex flex-col items-center">
-                    <div className="w-10 h-10 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin mb-4" />
-                    <p className="font-medium">Loading users...</p>
+                  <div className="flex-1 flex items-center justify-center text-slate-500 font-mono text-xs">
+                    LOADING_DATA_SET...
                   </div>
                 ) : filteredUsers.length === 0 ? (
-                  <div className="p-16 text-center text-slate-500 flex flex-col items-center">
-                    <div className="bg-slate-50 p-4 rounded-full mb-4">
-                      <UserX className="w-8 h-8 text-slate-400" />
-                    </div>
-                    <p className="text-lg font-semibold text-slate-700">No users found</p>
-                    <p className="text-sm text-slate-400 mt-1">Try adjusting your search</p>
+                  <div className="flex-1 flex items-center justify-center text-slate-400 font-mono text-xs">
+                    NO_RECORDS_FOUND
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
+                  <div className="border border-slate-300 overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs font-mono">
                       <thead>
-                        <tr className="bg-slate-50/80 border-b border-slate-200">
-                          <th className="p-4 pl-6 font-bold text-xs text-slate-500 uppercase tracking-wider">User</th>
-                          <th className="p-4 font-bold text-xs text-slate-500 uppercase tracking-wider">Contact Info</th>
-                          <th className="p-4 font-bold text-xs text-slate-500 uppercase tracking-wider">Role</th>
-                          <th className="p-4 font-bold text-xs text-slate-500 uppercase tracking-wider">Status</th>
-                          <th className="p-4 pr-6 font-bold text-xs text-slate-500 uppercase tracking-wider text-right">Actions</th>
+                        <tr className="bg-slate-100 text-slate-600">
+                          <th className="border-r border-b border-slate-300 px-3 py-2 font-bold w-12 text-center">ID</th>
+                          <th className="border-r border-b border-slate-300 px-3 py-2 font-bold">USER_IDENTITY</th>
+                          <th className="border-r border-b border-slate-300 px-3 py-2 font-bold">CONTACT_DATA</th>
+                          <th className="border-r border-b border-slate-300 px-3 py-2 font-bold w-32">ACCESS_LEVEL</th>
+                          <th className="border-r border-b border-slate-300 px-3 py-2 font-bold w-24">STATE</th>
+                          <th className="border-b border-slate-300 px-3 py-2 font-bold text-right">CONTROLS</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        <AnimatePresence>
-                          {filteredUsers.map((u) => (
-                            <motion.tr 
-                              key={u.id}
-                              initial={{ opacity: 0 }}
-                              animate={{ opacity: 1 }}
-                              exit={{ opacity: 0 }}
-                              className={`group hover:bg-slate-50/80 transition-colors ${u.banned ? 'bg-red-50/30' : ''}`}
-                            >
-                              <td className="p-4 pl-6">
-                                <div className="flex items-center gap-3">
-                                  <div className="relative">
-                                    <img src={u.avatar_url} alt="" className="w-10 h-10 rounded-full bg-slate-100 object-cover border border-slate-200 group-hover:border-blue-200 transition-colors" />
-                                    {u.verified === 1 && (
-                                      <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5 shadow-sm">
-                                        <BadgeCheck className="w-3.5 h-3.5 text-blue-500 fill-blue-500 text-white" />
-                                      </div>
-                                    )}
-                                  </div>
-                                  {editingId === u.id ? (
-                                    <input 
-                                      type="text" 
-                                      className="border border-blue-300 rounded-lg px-3 py-1.5 text-sm w-32 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                                      value={editForm.username}
-                                      onChange={e => setEditForm({...editForm, username: e.target.value})}
-                                      autoFocus
-                                    />
-                                  ) : (
-                                    <div>
-                                      <p className="font-semibold text-slate-900 text-sm">{u.username}</p>
-                                      <p className="text-[10px] text-slate-400 truncate max-w-[120px] font-mono mt-0.5">{u.id.slice(0, 8)}...</p>
-                                    </div>
-                                  )}
+                      <tbody>
+                        {filteredUsers.map((u, idx) => (
+                          <tr key={u.id} className="hover:bg-blue-50 group">
+                            <td className="border-r border-b border-slate-200 px-3 py-2 text-center text-slate-400 bg-slate-50">
+                              {idx + 1}
+                            </td>
+                            <td className="border-r border-b border-slate-200 px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 bg-slate-200 border border-slate-300 flex-shrink-0">
+                                  <img src={u.avatar_url} alt="" className="w-full h-full object-cover" />
                                 </div>
-                              </td>
-                              <td className="p-4">
                                 {editingId === u.id ? (
-                                  <div className="space-y-2">
-                                    <input 
-                                      type="text" 
-                                      placeholder="Email"
-                                      className="border border-slate-300 rounded px-2 py-1 text-xs w-full block focus:outline-none focus:border-blue-500"
-                                      value={editForm.email}
-                                      onChange={e => setEditForm({...editForm, email: e.target.value})}
-                                    />
-                                    <input 
-                                      type="text" 
-                                      placeholder="Phone"
-                                      className="border border-slate-300 rounded px-2 py-1 text-xs w-full block focus:outline-none focus:border-blue-500"
-                                      value={editForm.phone}
-                                      onChange={e => setEditForm({...editForm, phone: e.target.value})}
-                                    />
-                                  </div>
+                                  <input 
+                                    type="text" 
+                                    className="border border-blue-500 px-1 py-0.5 w-full bg-white focus:outline-none"
+                                    value={editForm.username}
+                                    onChange={e => setEditForm({...editForm, username: e.target.value})}
+                                    autoFocus
+                                  />
                                 ) : (
-                                  <div className="text-sm">
-                                    <div className="text-slate-700">{u.email || <span className="text-slate-400 italic">No email</span>}</div>
-                                    <div className="text-slate-500 text-xs mt-0.5">{u.phone || <span className="text-slate-400 italic">No phone</span>}</div>
+                                  <div>
+                                    <div className="font-bold text-slate-800">{u.username}</div>
+                                    <div className="text-[10px] text-slate-400">{u.id}</div>
                                   </div>
                                 )}
-                              </td>
-                              <td className="p-4">
-                                {editingId === u.id ? (
-                                  <select 
-                                    className="border border-slate-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-500"
-                                    value={editForm.role}
-                                    onChange={e => setEditForm({...editForm, role: e.target.value})}
-                                  >
-                                    <option value="user">User</option>
-                                    <option value="admin">Admin</option>
-                                  </select>
-                                ) : (
-                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                                    u.role === 'admin' 
-                                      ? 'bg-purple-50 text-purple-700 border-purple-100' 
-                                      : 'bg-slate-100 text-slate-600 border-slate-200'
-                                  }`}>
-                                    {u.role === 'admin' && <Shield className="w-3 h-3 mr-1" />}
-                                    {u.role.charAt(0).toUpperCase() + u.role.slice(1)}
-                                  </span>
-                                )}
-                              </td>
-                              <td className="p-4">
+                              </div>
+                            </td>
+                            <td className="border-r border-b border-slate-200 px-3 py-2">
+                              {editingId === u.id ? (
+                                <div className="space-y-1">
+                                  <input 
+                                    type="text" 
+                                    className="border border-slate-300 px-1 py-0.5 w-full focus:border-blue-500 focus:outline-none"
+                                    value={editForm.email}
+                                    onChange={e => setEditForm({...editForm, email: e.target.value})}
+                                    placeholder="Email"
+                                  />
+                                  <input 
+                                    type="text" 
+                                    className="border border-slate-300 px-1 py-0.5 w-full focus:border-blue-500 focus:outline-none"
+                                    value={editForm.phone}
+                                    onChange={e => setEditForm({...editForm, phone: e.target.value})}
+                                    placeholder="Phone"
+                                  />
+                                </div>
+                              ) : (
+                                <div className="space-y-0.5">
+                                  <div className="text-slate-700">{u.email || '-'}</div>
+                                  <div className="text-slate-500">{u.phone || '-'}</div>
+                                </div>
+                              )}
+                            </td>
+                            <td className="border-r border-b border-slate-200 px-3 py-2">
+                              {editingId === u.id ? (
+                                <select 
+                                  className="border border-slate-300 px-1 py-0.5 w-full focus:border-blue-500 focus:outline-none"
+                                  value={editForm.role}
+                                  onChange={e => setEditForm({...editForm, role: e.target.value})}
+                                >
+                                  <option value="user">USER</option>
+                                  <option value="employee">EMPLOYEE</option>
+                                  <option value="manager">MANAGER</option>
+                                  <option value="admin">ADMIN</option>
+                                </select>
+                              ) : (
+                                <span className={`px-1.5 py-0.5 text-[10px] font-bold border ${
+                                  u.role === 'admin' ? 'bg-purple-100 text-purple-700 border-purple-300' :
+                                  u.role === 'manager' ? 'bg-blue-100 text-blue-700 border-blue-300' :
+                                  u.role === 'employee' ? 'bg-orange-100 text-orange-700 border-orange-300' :
+                                  'bg-slate-100 text-slate-600 border-slate-300'
+                                }`}>
+                                  {u.role.toUpperCase()}
+                                </span>
+                              )}
+                            </td>
+                            <td className="border-r border-b border-slate-200 px-3 py-2">
                                 {u.banned ? (
-                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-100">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                                    Banned
-                                  </span>
+                                  <span className="text-red-600 font-bold bg-red-50 px-1 border border-red-200">BANNED</span>
                                 ) : (
-                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-100">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                                    Active
-                                  </span>
+                                  <span className="text-green-600 font-bold bg-green-50 px-1 border border-green-200">ACTIVE</span>
                                 )}
-                              </td>
-                              <td className="p-4 pr-6 text-right">
-                                {editingId === u.id ? (
-                                  <div className="flex items-center justify-end gap-2">
-                                    <button onClick={() => handleSave(u.id)} className="p-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors">
-                                      <Check className="w-4 h-4" />
-                                    </button>
-                                    <button onClick={() => setEditingId(null)} className="p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors">
-                                      <X className="w-4 h-4" />
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    {activeTab === 'users' && (
+                            </td>
+                              <td className="border-b border-slate-200 px-3 py-2 text-right">
+                              {editingId === u.id ? (
+                                <div className="flex justify-end gap-1">
+                                  <button onClick={() => handleSave(u.id)} className="px-2 py-1 bg-green-600 text-white hover:bg-green-700 text-[10px] uppercase">Save</button>
+                                  <button onClick={() => setEditingId(null)} className="px-2 py-1 bg-slate-200 text-slate-700 hover:bg-slate-300 text-[10px] uppercase">Cancel</button>
+                                </div>
+                              ) : (
+                                <div className="flex justify-end gap-1">
+                                   {activeTab === 'users' && (
                                       <>
-                                        <button onClick={() => setPasswordResetId(u.id)} className="p-2 text-slate-400 hover:text-yellow-600 hover:bg-yellow-50 rounded-lg transition-all" title="Reset Password">
-                                          <Lock className="w-4 h-4" />
+                                        <button onClick={() => setPasswordResetId(u.id)} className="p-1 border border-slate-300 bg-white hover:bg-slate-50 text-slate-600" title="Reset Password">
+                                          <Lock className="w-3 h-3" />
                                         </button>
-                                        <button onClick={() => handleEdit(u)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Edit User">
-                                          <Edit2 className="w-4 h-4" />
+                                        <button onClick={() => handleEdit(u)} className="p-1 border border-slate-300 bg-white hover:bg-slate-50 text-slate-600" title="Edit">
+                                          <Edit2 className="w-3 h-3" />
                                         </button>
                                         {u.id !== user?.id && (
-                                          <button onClick={() => handleDelete(u.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Delete User">
-                                            <Trash2 className="w-4 h-4" />
+                                          <button onClick={() => handleDelete(u.id)} className="p-1 border border-slate-300 bg-white hover:bg-red-50 text-red-600" title="Delete">
+                                            <Trash2 className="w-3 h-3" />
                                           </button>
                                         )}
                                       </>
-                                    )}
-                                    
-                                    {activeTab === 'banned' && (
-                                      <button 
-                                        onClick={() => handleBan(u.id, u.banned)} 
-                                        className="p-2 rounded-lg transition-all bg-green-50 text-green-600 hover:bg-green-100"
-                                        title="Unban User"
-                                      >
-                                        <Unlock className="w-4 h-4" /> Unban
+                                   )}
+                                   {activeTab === 'banned' && (
+                                      <button onClick={() => handleBan(u.id, u.banned)} className="px-2 py-0.5 border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 text-[10px] font-bold">
+                                        UNBAN
                                       </button>
-                                    )}
-
-                                    {activeTab === 'verified' && (
-                                      <button 
-                                        onClick={() => handleVerify(u.id, u.verified)} 
-                                        className="p-2 rounded-lg transition-all bg-red-50 text-red-600 hover:bg-red-100"
-                                        title="Remove Verification"
-                                      >
-                                        <X className="w-4 h-4" /> Revoke
+                                   )}
+                                   {activeTab === 'verified' && (
+                                      <button onClick={() => handleVerify(u.id, u.verified)} className="px-2 py-0.5 border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 text-[10px] font-bold">
+                                        REVOKE
                                       </button>
-                                    )}
-                                    
-                                    {/* Fallback for Overview or general actions if needed */}
-                                    {activeTab === 'overview' && (
-                                      <button onClick={() => setActiveTab('users')} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all">
-                                        <MoreHorizontal className="w-4 h-4" />
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
-                              </td>
-                            </motion.tr>
-                          ))}
-                        </AnimatePresence>
+                                   )}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
                 )}
               </div>
+            )}
+          </div>
+          
+          {/* Status Bar */}
+          <div className="bg-[#f3f3f3] border-t border-slate-300 px-2 py-1 flex justify-between items-center text-[10px] text-slate-500 font-mono select-none">
+            <div>READY</div>
+            <div className="flex gap-4">
+              <span>Ln {filteredUsers.length}, Col 6</span>
+              <span>UTF-8</span>
+              <span>MEM: {Math.round(Math.random() * 40 + 20)}%</span>
             </div>
-          )}
+          </div>
         </div>
+      </div>
 
-        {/* AI Assistant Panel */}
-        <AnimatePresence>
-          {showAiPanel && (
-            <motion.div 
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="w-80 md:w-96 bg-white border-l border-slate-200 shadow-2xl flex flex-col z-20 absolute right-0 top-0 bottom-0"
-            >
-              <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-purple-50 to-white">
-                <div className="flex items-center gap-2 text-purple-900 font-semibold">
-                  <Sparkles className="w-5 h-5 text-purple-600" />
-                  AI Admin Support
-                </div>
-                <button onClick={() => setShowAiPanel(false)} className="p-1 hover:bg-purple-100 rounded-full text-slate-400 hover:text-purple-600 transition-colors">
-                  <X className="w-5 h-5" />
+      {/* AI Assistant Panel (Floating Window Style) */}
+      <AnimatePresence>
+        {showAiPanel && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="absolute right-4 top-12 w-80 bg-[#f0f0f0] border-2 border-slate-400 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.2)] z-50 flex flex-col"
+            style={{ height: 'calc(100% - 100px)' }}
+          >
+            <div className="bg-slate-700 text-white px-2 py-1 flex items-center justify-between cursor-move select-none">
+              <div className="flex items-center gap-2 text-xs font-bold">
+                <Bot className="w-3 h-3" />
+                <span>AI_HELPER.EXE</span>
+              </div>
+              <button onClick={() => setShowAiPanel(false)} className="hover:bg-red-500 p-0.5 transition-colors">
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+            
+            <div className="flex-1 p-2 overflow-y-auto bg-white font-mono text-xs border-b border-slate-300">
+               {aiResponse ? (
+                 <div className="whitespace-pre-wrap text-slate-700">{aiResponse}</div>
+               ) : (
+                 <div className="text-slate-400 text-center mt-10">
+                   // WAITING FOR INPUT...<br/>
+                   // TYPE QUERY BELOW
+                 </div>
+               )}
+            </div>
+
+            <form onSubmit={handleAiAsk} className="p-2 bg-[#e0e0e0]">
+              <div className="flex gap-1">
+                <input
+                  type="text"
+                  className="flex-1 h-8 px-2 text-xs border border-slate-400 focus:outline-none focus:border-blue-600 font-mono"
+                  placeholder="CMD_INPUT..."
+                  value={aiQuery}
+                  onChange={(e) => setAiQuery(e.target.value)}
+                  disabled={aiLoading}
+                />
+                <button 
+                  type="submit" 
+                  disabled={aiLoading}
+                  className="px-3 bg-slate-300 border border-slate-400 text-xs font-bold hover:bg-slate-400 active:bg-slate-500 active:text-white transition-colors"
+                >
+                  RUN
                 </button>
               </div>
-              
-              <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50/50">
-                {aiResponse ? (
-                  <motion.div 
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="bg-white p-4 rounded-2xl rounded-tl-none shadow-sm text-sm text-slate-700 leading-relaxed border border-purple-100"
-                  >
-                    <div className="flex items-center gap-2 mb-2 text-purple-700 font-medium text-xs uppercase tracking-wider">
-                      <Bot className="w-3.5 h-3.5" />
-                      AI Assistant
-                    </div>
-                    {aiResponse}
-                  </motion.div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-center text-slate-400 p-8">
-                    <div className="w-16 h-16 bg-purple-50 rounded-full flex items-center justify-center mb-4">
-                      <Bot className="w-8 h-8 text-purple-300" />
-                    </div>
-                    <h3 className="text-slate-700 font-medium mb-1">How can I help?</h3>
-                    <p className="text-sm">Ask me about user management, resolving conflicts, or system issues.</p>
-                    
-                    <div className="mt-6 grid gap-2 w-full">
-                      <button onClick={() => setAiQuery("How do I handle a reported user?")} className="text-xs bg-white border border-slate-200 hover:border-purple-300 hover:text-purple-600 p-2 rounded-lg transition-colors text-left">
-                        "How do I handle a reported user?"
-                      </button>
-                      <button onClick={() => setAiQuery("Best practices for moderation?")} className="text-xs bg-white border border-slate-200 hover:border-purple-300 hover:text-purple-600 p-2 rounded-lg transition-colors text-left">
-                        "Best practices for moderation?"
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
+            </form>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-              <form onSubmit={handleAiAsk} className="p-4 border-t border-slate-100 bg-white">
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Ask for help..."
-                    className="w-full pl-4 pr-10 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-sm bg-slate-50 focus:bg-white transition-all shadow-sm"
-                    value={aiQuery}
-                    onChange={(e) => setAiQuery(e.target.value)}
-                    disabled={aiLoading}
-                  />
-                  <button 
-                    type="submit" 
-                    disabled={aiLoading || !aiQuery.trim()}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-white bg-purple-600 hover:bg-purple-700 rounded-lg disabled:opacity-50 disabled:bg-slate-300 transition-colors shadow-sm"
-                  >
-                    {aiLoading ? (
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <Send className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Password Reset Modal */}
-        <AnimatePresence>
-          {passwordResetId && (
+      {/* Password Reset Modal (Window Style) */}
+      <AnimatePresence>
+        {passwordResetId && (
+          <div className="fixed inset-0 z-50 bg-black/20 backdrop-blur-[1px] flex items-center justify-center">
             <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm"
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.9 }}
+              className="bg-[#f0f0f0] border-2 border-slate-500 shadow-[8px_8px_0px_0px_rgba(0,0,0,0.2)] w-96"
             >
-              <motion.div 
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
-                className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
-              >
-                <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-                  <h3 className="font-bold text-lg text-slate-800">Reset Password</h3>
-                  <button onClick={() => setPasswordResetId(null)} className="p-1 hover:bg-slate-100 rounded-full text-slate-400 transition-colors">
-                    <X className="w-5 h-5" />
+              <div className="bg-slate-800 text-white px-2 py-1 flex items-center justify-between select-none">
+                <span className="text-xs font-bold">SECURITY_OVERRIDE</span>
+                <button onClick={() => setPasswordResetId(null)} className="hover:bg-red-500 p-0.5">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+              <div className="p-4">
+                <p className="text-xs font-mono text-slate-700 mb-4">
+                  WARNING: RESETTING CREDENTIALS FOR USER_ID: {passwordResetId}
+                </p>
+                <input 
+                  type="password" 
+                  placeholder="ENTER_NEW_PASSWORD"
+                  className="w-full px-2 py-1.5 text-sm border border-slate-400 font-mono focus:outline-none focus:border-blue-600 mb-4 bg-white"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                />
+                <div className="flex justify-end gap-2">
+                  <button 
+                    onClick={() => setPasswordResetId(null)}
+                    className="px-3 py-1 border border-slate-400 bg-white hover:bg-slate-100 text-xs font-bold"
+                  >
+                    CANCEL
+                  </button>
+                  <button 
+                    onClick={() => handlePasswordReset(passwordResetId)}
+                    className="px-3 py-1 border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 text-xs font-bold"
+                  >
+                    EXECUTE
                   </button>
                 </div>
-                <div className="p-6">
-                  <p className="text-sm text-slate-500 mb-4">Enter a new password for this user. This action cannot be undone.</p>
-                  <input 
-                    type="password" 
-                    placeholder="New Password"
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm mb-4"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                  />
-                  <div className="flex justify-end gap-3">
-                    <button 
-                      onClick={() => setPasswordResetId(null)}
-                      className="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-50 font-medium text-sm transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button 
-                      onClick={() => handlePasswordReset(passwordResetId)}
-                      disabled={!newPassword.trim()}
-                      className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Update Password
-                    </button>
-                  </div>
-                </div>
-              </motion.div>
+              </div>
             </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* Footer */}
-      <div className="bg-white border-t border-slate-200 p-4 text-center text-xs text-slate-400 font-medium">
-        &copy; {new Date().getFullYear()} Abdul Rahman Habib Team. All rights reserved.
-      </div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -248,23 +248,23 @@ export const getBlockedUsers = (userId: string) => {
 };
 
 export const ensureAIUser = () => {
-  const aiUser = db.prepare('SELECT * FROM users WHERE username = ?').get('Alpha 3.1') as any;
-  if (!aiUser) {
-    const id = 'ai-assistant';
-    const username = 'Alpha 3.1';
-    const role = 'admin'; 
-    const status = 'I am Alpha 3.1, your AI Assistant.';
-    const avatar = 'https://api.dicebear.com/7.x/bottts/svg?seed=Alpha3.1'; 
-    
+  const AI_BOTS_DB = [
+    { id: 'ai-flash', username: 'Flash Bot', avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=flash', status: 'Fast AI responses' },
+    { id: 'ai-pro', username: 'Pro Bot', avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=pro', status: 'Complex reasoning' },
+    { id: 'ai-search', username: 'Search Bot', avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=search', status: 'Google Search enabled' },
+    { id: 'ai-assistant', username: 'Alpha 3.1', avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=general', status: 'General Intelligence' },
+    { id: 'ai-general', username: 'Gemini Assistant', avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=general', status: 'General Intelligence' }
+  ];
+
+  const insertStmt = db.prepare('INSERT OR IGNORE INTO users (id, username, role, status, avatar_url, verified, banned) VALUES (?, ?, ?, ?, ?, 1, 0)');
+  
+  AI_BOTS_DB.forEach(bot => {
     try {
-      db.prepare('INSERT INTO users (id, username, role, status, avatar_url, verified, banned) VALUES (?, ?, ?, ?, ?, 1, 0)').run(id, username, role, status, avatar);
-      console.log('AI User "Alpha 3.1" created.');
+      insertStmt.run(bot.id, bot.username, 'admin', bot.status, bot.avatar);
     } catch (e) {
-      console.error('Error creating AI user:', e);
+      console.error(`Error ensuring AI user ${bot.username}:`, e);
     }
-    return id;
-  }
-  return aiUser.id;
+  });
 };
 
 export const isUserBlocked = (userId: string, otherUserId: string) => {

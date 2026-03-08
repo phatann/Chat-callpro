@@ -6,6 +6,8 @@ export interface User {
   avatar_url: string;
   role?: string;
   status?: string;
+  verified?: number;
+  banned?: number;
 }
 
 export interface Message {
@@ -26,4 +28,5 @@ export interface Chat {
   last_message_time: string;
   last_message_sender: string;
   unread_count: number;
+  verified?: number;
 }

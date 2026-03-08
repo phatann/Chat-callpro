@@ -21,6 +21,30 @@ if (!apiKey) {
 }
 const ai = new GoogleGenAI({ apiKey: apiKey });
 
+const AI_CONFIGS: Record<string, any> = {
+  'ai-flash': { 
+    model: 'gemini-3.1-flash-lite-preview', 
+    systemInstruction: 'You are Flash Bot, a fast AI assistant. Respond instantly and concisely.' 
+  },
+  'ai-pro': { 
+    model: 'gemini-3.1-pro-preview', 
+    systemInstruction: 'You are Pro Bot, an advanced AI assistant capable of complex reasoning. Be thorough and detailed.' 
+  },
+  'ai-search': { 
+    model: 'gemini-3-flash-preview', 
+    systemInstruction: 'You are Search Bot. You have access to Google Search. Use it to provide up-to-date information.', 
+    tools: [{ googleSearch: {} }] 
+  },
+  'ai-assistant': { 
+    model: 'gemini-3-flash-preview', 
+    systemInstruction: 'You are Alpha 3.1, an intelligent AI assistant in a chat application. Your goal is to help users with their problems and answer their questions. Be helpful, polite, and concise.' 
+  },
+  'ai-general': { 
+    model: 'gemini-3-flash-preview', 
+    systemInstruction: 'You are Gemini Assistant. Be helpful and polite.' 
+  }
+};
+
 // Ensure AI User exists
 db.ensureAIUser();
 
@@ -107,33 +131,39 @@ async function startServer() {
             // Send back to sender (confirmation)
             ws.send(JSON.stringify({ type: 'chat_ack', message: msg }));
             
-            // Check if receiver is AI Assistant
-            if (receiverId === 'ai-assistant') {
+            // Check if receiver is an AI Bot
+            if (receiverId.startsWith('ai-')) {
               (async () => {
                 try {
                   // Simulate "typing" delay slightly for realism
                   await new Promise(resolve => setTimeout(resolve, 500));
                   
-                  const prompt = `You are Alpha 3.1, an intelligent AI assistant in a chat application.
-                  Your goal is to help users with their problems and answer their questions.
-                  Be helpful, polite, and concise.
+                  const botConfig = AI_CONFIGS[receiverId] || AI_CONFIGS['ai-assistant'];
+                  
+                  const prompt = `${botConfig.systemInstruction}
                   
                   User: ${content}`;
                   
-                  const result = await ai.models.generateContent({
-                    model: "gemini-2.5-flash",
+                  const generateConfig: any = {
+                    model: botConfig.model,
                     contents: prompt,
-                  });
+                  };
+                  
+                  if (botConfig.tools) {
+                    generateConfig.config = { tools: botConfig.tools };
+                  }
+                  
+                  const result = await ai.models.generateContent(generateConfig);
                   const responseText = result.text;
                   
-                  const aiMsg = db.createMessage('ai-assistant', userId, responseText || "I'm sorry, I couldn't generate a response.", 'text');
+                  const aiMsg = db.createMessage(receiverId, userId, responseText || "I'm sorry, I couldn't generate a response.", 'text');
                   
                   if (ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: 'chat_new', message: aiMsg }));
                   }
                 } catch (error) {
                   console.error('AI Response Error:', error);
-                  const errorMsg = db.createMessage('ai-assistant', userId, "I'm having trouble processing that right now. Please try again later.", 'text');
+                  const errorMsg = db.createMessage(receiverId, userId, "I'm having trouble processing that right now. Please try again later.", 'text');
                   if (ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: 'chat_new', message: errorMsg }));
                   }
@@ -527,6 +557,11 @@ async function startServer() {
   } else {
     // Serve static files in production (if built)
     app.use(express.static(path.join(__dirname, 'dist')));
+
+    // SPA Fallback for production
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    });
   }
 
   const PORT = 3000;

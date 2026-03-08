@@ -9,7 +9,7 @@ import AdminDashboard from './AdminDashboard';
 import ContactsPage from './ContactsPage';
 import AuthPage from './AuthPage';
 import { User, Message } from '../types';
-import { requestNotificationPermission, sendNotification } from '../utils/notifications';
+import { requestNotificationPermission, sendNotification, playNotificationSound } from '../utils/notifications';
 
 export default function Dashboard() {
   const { user, loading } = useAuth();
@@ -30,22 +30,29 @@ export default function Dashboard() {
 
   const ws = useWebSocket(user?.id, {
     onMessage: async (msg) => {
-      // If message is from someone else AND (window is hidden OR not in this chat)
-      if (msg.sender_id !== user?.id && (document.hidden || selectedChatUser?.id !== msg.sender_id)) {
-        try {
-          // Try to get username from existing chats if possible to save a fetch, 
-          // but fetching is safer for correct name
-          const res = await fetch(`/api/users/${msg.sender_id}`);
-          if (res.ok) {
-            const data = await res.json();
-            const senderName = data.user.username;
-            sendNotification(`New message from ${senderName}`, {
-              body: msg.type === 'image' ? 'Sent an image' : msg.content,
-              icon: data.user.avatar_url
-            });
+      // If message is from someone else
+      if (msg.sender_id !== user?.id) {
+        const isBackground = document.hidden || selectedChatUser?.id !== msg.sender_id;
+
+        if (isBackground) {
+          try {
+            // Try to get username from existing chats if possible to save a fetch, 
+            // but fetching is safer for correct name
+            const res = await fetch(`/api/users/${msg.sender_id}`);
+            if (res.ok) {
+              const data = await res.json();
+              const senderName = data.user.username;
+              sendNotification(`New message from ${senderName}`, {
+                body: msg.type === 'image' ? 'Sent an image' : msg.content,
+                icon: data.user.avatar_url
+              });
+            }
+          } catch (e) {
+            sendNotification('New Message', { body: msg.content });
           }
-        } catch (e) {
-          sendNotification('New Message', { body: msg.content });
+        } else {
+          // Play sound if in foreground and in chat (since sendNotification plays it otherwise)
+          playNotificationSound();
         }
       }
     },
@@ -65,6 +72,9 @@ export default function Dashboard() {
         } catch (e) {
           sendNotification('Incoming Call', { body: 'Click to answer' });
         }
+      } else {
+        // Play sound if in foreground
+        playNotificationSound();
       }
     }
   });

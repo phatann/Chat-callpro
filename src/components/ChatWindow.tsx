@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, FormEvent } from 'react';
+import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
 import { Send, Phone, Video, MoreVertical, Paperclip, Smile, ArrowLeft, Mic, Ban, VolumeX, X, Square, Play, Pause, User as UserIcon, BadgeCheck, Loader2, FileText } from 'lucide-react';
 import { User, Message } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -9,7 +9,7 @@ import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 interface ChatWindowProps {
   chatUser: User;
   messages: Message[];
-  onSendMessage: (content: string, type?: 'text' | 'image' | 'video' | 'audio') => void;
+  onSendMessage: (content: string, type?: 'text' | 'image' | 'video' | 'audio' | 'document') => void;
   onStartCall: (video: boolean) => void;
   onBack: () => void;
   isConnected: boolean;
@@ -37,6 +37,7 @@ export default function ChatWindow({ chatUser, messages, onSendMessage, onStartC
   
   // File Upload State
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -123,7 +124,7 @@ export default function ChatWindow({ chatUser, messages, onSendMessage, onStartC
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
     setNewMessage(e.target.value);
     
     // Throttle typing events
@@ -211,35 +212,58 @@ export default function ChatWindow({ chatUser, messages, onSendMessage, onStartC
     }
   };
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsUploading(true);
+    setUploadProgress(0);
     const formData = new FormData();
     formData.append('file', file);
 
-    try {
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData
-      });
-      const data = await res.json();
-      
-      if (data.url) {
-        let type: 'image' | 'video' | 'document' = 'document';
-        if (file.type.startsWith('image/')) type = 'image';
-        else if (file.type.startsWith('video/')) type = 'video';
-        
-        onSendMessage(data.url, type);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload', true);
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const percentComplete = (event.loaded / event.total) * 100;
+        setUploadProgress(percentComplete);
       }
-    } catch (err) {
-      console.error('Upload failed:', err);
-      alert('File upload failed');
-    } finally {
+    };
+
+    xhr.onload = () => {
+      if (xhr.status === 200) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          if (data.url) {
+            let type: 'image' | 'video' | 'document' = 'document';
+            if (file.type.startsWith('image/')) type = 'image';
+            else if (file.type.startsWith('video/')) type = 'video';
+            
+            onSendMessage(data.url, type);
+          }
+        } catch (e) {
+          console.error('Error parsing response:', e);
+          alert('File upload failed');
+        }
+      } else {
+        console.error('Upload failed:', xhr.statusText);
+        alert('File upload failed');
+      }
       setIsUploading(false);
+      setUploadProgress(0);
       if (fileInputRef.current) fileInputRef.current.value = '';
-    }
+    };
+
+    xhr.onerror = () => {
+      console.error('Upload failed');
+      alert('File upload failed');
+      setIsUploading(false);
+      setUploadProgress(0);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
+    xhr.send(formData);
   };
 
   const formatTime = (seconds: number) => {
@@ -404,14 +428,17 @@ export default function ChatWindow({ chatUser, messages, onSendMessage, onStartC
                     href={msg.content} 
                     target="_blank" 
                     rel="noopener noreferrer"
+                    download
                     className="flex items-center gap-3 p-3 bg-slate-50/80 rounded-xl hover:bg-slate-100 transition-colors min-w-[220px] border border-slate-100 group"
                   >
                     <div className="w-10 h-10 bg-red-50 rounded-lg flex items-center justify-center text-red-500 group-hover:scale-110 transition-transform">
                       <FileText className="w-5 h-5" />
                     </div>
                     <div className="flex-1 overflow-hidden">
-                      <p className="text-sm font-semibold truncate text-slate-700">Document</p>
-                      <p className="text-[11px] text-slate-500 font-medium uppercase tracking-wide">Download</p>
+                      <p className="text-sm font-semibold truncate text-slate-700" title={decodeURIComponent(msg.content.split('/').pop() || 'Document')}>
+                        {decodeURIComponent(msg.content.split('/').pop()?.split('-').slice(2).join('-') || msg.content.split('/').pop() || 'Document')}
+                      </p>
+                      <p className="text-[11px] text-slate-500 font-medium uppercase tracking-wide">Click to Download</p>
                     </div>
                   </a>
                 ) : (
@@ -450,8 +477,28 @@ export default function ChatWindow({ chatUser, messages, onSendMessage, onStartC
         ) : (
           <>
             <AnimatePresence mode="wait">
-              {isRecording ? (
+              {isUploading ? (
                 <motion.div 
+                  key="uploading"
+                  initial={{ opacity: 0, width: 0 }}
+                  animate={{ opacity: 1, width: '100%' }}
+                  exit={{ opacity: 0, width: 0 }}
+                  className="flex-1 bg-white rounded-2xl flex items-center px-4 py-3 shadow-sm border border-blue-100 gap-3"
+                >
+                  <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+                  <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <motion.div 
+                      className="h-full bg-blue-500"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${uploadProgress}%` }}
+                      transition={{ duration: 0.1 }}
+                    />
+                  </div>
+                  <span className="text-xs font-medium text-slate-500 w-8 text-right">{Math.round(uploadProgress)}%</span>
+                </motion.div>
+              ) : isRecording ? (
+                <motion.div 
+                  key="recording"
                   initial={{ opacity: 0, width: 0 }}
                   animate={{ opacity: 1, width: '100%' }}
                   exit={{ opacity: 0, width: 0 }}
@@ -464,7 +511,7 @@ export default function ChatWindow({ chatUser, messages, onSendMessage, onStartC
                   </button>
                 </motion.div>
               ) : (
-                <div className="flex-1 bg-white rounded-2xl flex items-center px-2 py-1.5 shadow-sm border border-slate-200 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500/30 transition-all">
+                <div key="input" className="flex-1 bg-white rounded-2xl flex items-center px-2 py-1.5 shadow-sm border border-slate-200 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500/30 transition-all">
                   <button 
                     className={`p-2.5 transition-colors rounded-full hover:bg-slate-50 ${showEmojiPicker ? 'text-blue-500 bg-blue-50' : 'text-slate-400 hover:text-blue-500'}`}
                     onClick={() => setShowEmojiPicker(!showEmojiPicker)}
@@ -494,7 +541,7 @@ export default function ChatWindow({ chatUser, messages, onSendMessage, onStartC
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isUploading}
                   >
-                    {isUploading ? <Loader2 className="w-5 h-5 animate-spin text-blue-500" /> : <Paperclip className="w-5 h-5" />}
+                    <Paperclip className="w-5 h-5" />
                   </button>
                   <input 
                     type="file" 
@@ -516,6 +563,7 @@ export default function ChatWindow({ chatUser, messages, onSendMessage, onStartC
                     ? 'bg-blue-500 hover:bg-blue-600 text-white shadow-blue-500/30' 
                     : 'bg-slate-200 text-slate-500 hover:bg-slate-300'
               }`}
+              disabled={isUploading}
             >
               {isRecording ? (
                 <Send className="w-5 h-5 ml-0.5" />
